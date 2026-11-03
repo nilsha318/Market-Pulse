@@ -1,0 +1,204 @@
+"""SQLite storage for the synthetic supermarket sales dataset."""
+
+import argparse
+import csv
+from getpass import getpass
+import os
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CSV_PATH = ROOT / "data" / "SuperMarket Analysis.csv"
+DATABASE_PATH = ROOT / "data" / "orders.sqlite3"
+
+
+class PgRow(dict):
+    """Mapping row that also supports SQLite-style numeric indexing."""
+    def __init__(self, values):
+        from datetime import date, datetime
+        from decimal import Decimal
+        super().__init__((key, value.isoformat() if isinstance(value, (date, datetime))
+                          else float(value) if isinstance(value, Decimal)
+                          else bytes(value) if isinstance(value, memoryview)
+                          else value) for key, value in values.items())
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return tuple(self.values())[key]
+        return super().__getitem__(key)
+
+
+class PgCursor:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def execute(self, sql, params=()):
+        sql = sql.replace("?", "%s")
+        sql = sql.replace("COLLATE NOCASE", "")
+        try:
+            self.cursor.execute(sql, params)
+        except Exception as error:
+            if getattr(error, "pgcode", None) in ("23505", "23503", "23514"):
+                raise sqlite3.IntegrityError(str(error)) from error
+            raise
+        return self
+
+    def executemany(self, sql, params):
+        self.cursor.executemany(sql.replace("?", "%s"), params)
+        return self
+
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        return PgRow(row) if row is not None else None
+
+    def fetchall(self):
+        return [PgRow(row) for row in self.cursor.fetchall()]
+
+
+class PgConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, sql, params=()):
+        from psycopg2.extras import RealDictCursor
+        return PgCursor(self.connection.cursor(cursor_factory=RealDictCursor)).execute(sql, params)
+
+    def executemany(self, sql, params):
+        from psycopg2.extras import RealDictCursor
+        return PgCursor(self.connection.cursor(cursor_factory=RealDictCursor)).executemany(sql, params)
+
+    def commit(self):
+        self.connection.commit()
+
+    def rollback(self):
+        self.connection.rollback()
+
+    def close(self):
+        self.connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+
+SALES_COLUMNS = {
+    "invoice_id": "Invoice ID",
+    "branch": "Branch",
+    "city": "City",
+    "customer_type": "Customer type",
+    "gender": "Gender",
+    "product_line": "Product line",
+    "unit_price": "Unit price",
+    "quantity": "Quantity",
+    "tax_5_percent": "Tax 5%",
+    "sales": "Sales",
+    "date": "Date",
+    "time": "Time",
+    "payment": "Payment",
+    "cogs": "cogs",
+    "gross_margin_percentage": "gross margin percentage",
+    "gross_income": "gross income",
+    "rating": "Rating",
+}
+
+
+def is_postgres(path: Path = DATABASE_PATH) -> bool:
+    return path == DATABASE_PATH and os.environ.get("MARKET_PULSE_DB", "postgres").lower() == "postgres"
+
+
+def connect(path: Path = DATABASE_PATH):
+    """Open the selected SQL database and return rows by column name."""
+    if is_postgres(path):
+        database_url = os.environ.get("DATABASE_URL")
+        if database_url:
+            import psycopg2
+            connection = psycopg2.connect(database_url, connect_timeout=5)
+            return PgConnection(connection)
+        if not os.environ.get("PGPASSWORD"):
+            os.environ["PGPASSWORD"] = getpass(
+                "Password for pgAdmin server Nilsha (postgres@localhost:5432): "
+            )
+        import psycopg2
+        connection = psycopg2.connect(
+            host=os.environ.get("PGHOST", "localhost"),
+            port=os.environ.get("PGPORT", "5432"),
+            dbname=os.environ.get("PGDATABASE", "market_pulse"),
+            user=os.environ.get("PGUSER", "postgres"),
+            connect_timeout=5,
+        )
+        return PgConnection(connection)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize(source: Path = CSV_PATH, database: Path = DATABASE_PATH,
+               replace: bool = False) -> int:
+    """Create the sales table and import rows while retaining source values."""
+    with source.open(newline="", encoding="utf-8-sig") as file:
+        records = list(csv.DictReader(file))
+
+    postgres = is_postgres(database)
+    with closing(connect(database)) as connection, connection:
+        identity = ("BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY" if postgres
+                    else "INTEGER PRIMARY KEY")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS sales (
+                source_row """ + identity + """,
+                invoice_id TEXT,
+                branch TEXT,
+                city TEXT,
+                customer_type TEXT,
+                gender TEXT,
+                product_line TEXT,
+                unit_price TEXT,
+                quantity TEXT,
+                tax_5_percent TEXT,
+                sales TEXT,
+                date TEXT,
+                time TEXT,
+                payment TEXT,
+                cogs TEXT,
+                gross_margin_percentage TEXT,
+                gross_income TEXT,
+                rating TEXT
+            )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_sales_invoice ON sales(invoice_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_sales_product_line ON sales(product_line)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_sales_branch ON sales(branch)")
+        existing = connection.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
+        if existing and not replace:
+            return existing
+        if replace:
+            connection.execute("DELETE FROM sales")
+        fields = ["source_row", *SALES_COLUMNS.keys()]
+        placeholders = ", ".join("?" for _ in fields)
+        column_list = ", ".join(fields)
+        overriding = " OVERRIDING SYSTEM VALUE" if postgres else ""
+        connection.executemany(
+            f"INSERT INTO sales ({column_list}){overriding} VALUES ({placeholders})",
+            [(row_number, *(row.get(source_name, "") for source_name in SALES_COLUMNS.values()))
+             for row_number, row in enumerate(records, start=2)],
+        )
+        return len(records)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=CSV_PATH, help="Source orders CSV")
+    parser.add_argument("--database", type=Path, default=DATABASE_PATH, help="SQLite database path")
+    parser.add_argument("--replace", action="store_true", help="Replace table rows from the source CSV")
+    args = parser.parse_args()
+    count = initialize(args.source, args.database, args.replace)
+    print(f"SQLite database ready: {args.database} ({count} rows)")
+
+
+if __name__ == "__main__":
+    main()

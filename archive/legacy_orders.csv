@@ -1,0 +1,14 @@
+order_id,order_date,store,status,amount
+1001,2026-09-01,Innsbruck,completed,120.00
+1002,2026-09-01,Kufstein,completed,80.00
+1003,2026-09-02,Innsbruck,cancelled,60.00
+1004,2026-09-02,Wörgl,completed,
+1005,2026-09-03,Kufstein,completed,0
+1006,2026-09-03,Innsbruck,completed,95.50
+1006,2026-09-03,Innsbruck,completed,95.50
+1007,2026-09-04,,completed,40.00
+1008,2026-09-04,Schwaz,complet,70.00
+1009,2026-09-05,Wörgl,completed,-15.00
+1010,2026-13-05,Lienz,completed,55.00
+1011,2026-09-06,Kufstein,cancelled,0
+1012,2026-09-06,Lienz,completed,110.00

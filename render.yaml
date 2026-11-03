@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: market-pulse
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: projects/market-pulse
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.dashboard
+    healthCheckPath: /login
+    envVars:
+      - key: MARKET_PULSE_DB
+        value: postgres
+      - key: MARKET_PULSE_SECURE_COOKIES
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: MARKET_PULSE_INITIAL_ADMIN_USERNAME
+        sync: false
+      - key: MARKET_PULSE_INITIAL_ADMIN_PASSWORD
+        sync: false

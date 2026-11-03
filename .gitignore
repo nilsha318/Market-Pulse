@@ -1,0 +1,7 @@
+﻿.env
+data/*.sqlite3
+__pycache__/
+*.pyc
+n8n/files/valid.csv
+n8n/files/errors.csv
+.claude/skills/
