@@ -38,7 +38,7 @@ per month; its database compute scales to zero when idle. Check the providers'
 To deploy:
 
 1. Create a free PostgreSQL project on Neon and copy its connection string.
-2. Put this project in a GitLab repository you can connect to Render.
+2. Connect your GitHub repository to Render.
 3. In Render, create a Blueprint from that repository and set its Blueprint path
    to `projects/market-pulse/render.yaml` if using the course collection repo.
 4. When prompted, enter the Neon connection string, a 3–40 character admin
@@ -89,6 +89,14 @@ Employees receive department-scoped access; the Finance dashboard requires an
 employee assigned to Finance with the exact job title `Accountant`. The sample
 dataset has no individual customer ID, so admins assign Invoice IDs to
 customer accounts.
+
+Sales employees can filter historical sales by branch, product line, and date;
+set monthly branch/product-line targets; create and update fictional lead
+follow-up tasks; log sales activities; and submit campaign proposals. Admins can
+approve or decline proposals. Approval records the review; admins still create
+and publish the priced offer from the existing offer form. Keep follow-up labels
+and activity entries fictional because the historical sample has no contact
+details or current customer records.
 
 Create the first Admin account interactively (the password is hashed in
 SQLite; no default credentials are included):

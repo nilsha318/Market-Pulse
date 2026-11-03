@@ -55,6 +55,10 @@ class PgCursor:
     def fetchall(self):
         return [PgRow(row) for row in self.cursor.fetchall()]
 
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
 
 class PgConnection:
     def __init__(self, connection):
